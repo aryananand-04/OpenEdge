@@ -23,3 +23,5 @@ OpenEdge project timeline
 - Add WebViewActivity and layout (2025-11-13 23:30:00)
 
 - Remove unused Compose dependencies and theme files (2025-11-14 01:20:00)
+
+- Add debug logging across Kotlin and native code (2025-11-14 02:45:00)
