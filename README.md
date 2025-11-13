@@ -17,3 +17,5 @@ OpenEdge project timeline
 - Integrate GLSurfaceView and Camera GL renderer (2025-11-13 19:35:00)
 
 - Fix OpenGL threading and add frame mutexing (2025-11-13 20:50:00)
+
+- Add processing mode buttons and handlers (2025-11-13 22:15:00)
