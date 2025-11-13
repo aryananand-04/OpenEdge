@@ -5,3 +5,5 @@ OpenEdge project timeline
 - Add OpenCV Android SDK integration (2025-11-13 11:28:00)
 
 - Create JNI bridge and basic frame processing structure (2025-11-13 12:15:00)
+
+- Implement YUV NV21 to BGR conversion using OpenCV (2025-11-13 14:30:00)
