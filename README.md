@@ -7,3 +7,5 @@ OpenEdge project timeline
 - Create JNI bridge and basic frame processing structure (2025-11-13 12:15:00)
 
 - Implement YUV NV21 to BGR conversion using OpenCV (2025-11-13 14:30:00)
+
+- Add grayscale, blur, and edge detection processing modes (2025-11-13 15:45:00)
