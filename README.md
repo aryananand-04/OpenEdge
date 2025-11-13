@@ -29,3 +29,5 @@ OpenEdge project timeline
 - Update AndroidManifest with features and WebView config (2025-11-14 03:10:00)
 
 - Final code cleanup and comments (2025-11-14 04:30:00)
+
+- Fix CMake paths and ensure proper OpenCV linking (2025-11-14 05:15:00)
