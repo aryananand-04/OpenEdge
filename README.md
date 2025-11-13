@@ -15,3 +15,5 @@ OpenEdge project timeline
 - Create OpenGL ES 2.0 renderer with shaders (2025-11-13 18:10:00)
 
 - Integrate GLSurfaceView and Camera GL renderer (2025-11-13 19:35:00)
+
+- Fix OpenGL threading and add frame mutexing (2025-11-13 20:50:00)
