@@ -19,3 +19,5 @@ OpenEdge project timeline
 - Fix OpenGL threading and add frame mutexing (2025-11-13 20:50:00)
 
 - Add processing mode buttons and handlers (2025-11-13 22:15:00)
+
+- Add WebViewActivity and layout (2025-11-13 23:30:00)
