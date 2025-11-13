@@ -9,3 +9,5 @@ OpenEdge project timeline
 - Implement YUV NV21 to BGR conversion using OpenCV (2025-11-13 14:30:00)
 
 - Add grayscale, blur, and edge detection processing modes (2025-11-13 15:45:00)
+
+- Fix YUV conversion handling for CameraX pixel stride (2025-11-13 16:20:00)
