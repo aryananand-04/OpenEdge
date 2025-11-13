@@ -13,3 +13,5 @@ OpenEdge project timeline
 - Fix YUV conversion handling for CameraX pixel stride (2025-11-13 16:20:00)
 
 - Create OpenGL ES 2.0 renderer with shaders (2025-11-13 18:10:00)
+
+- Integrate GLSurfaceView and Camera GL renderer (2025-11-13 19:35:00)
