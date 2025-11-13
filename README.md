@@ -21,3 +21,5 @@ OpenEdge project timeline
 - Add processing mode buttons and handlers (2025-11-13 22:15:00)
 
 - Add WebViewActivity and layout (2025-11-13 23:30:00)
+
+- Remove unused Compose dependencies and theme files (2025-11-14 01:20:00)
