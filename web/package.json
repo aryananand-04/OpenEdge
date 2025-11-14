@@ -1,0 +1,23 @@
+{
+  "name": "openedge-web-viewer",
+  "version": "1.0.0",
+  "description": "TypeScript web viewer for OpenEdge processed frames",
+  "main": "dist/viewer.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "serve": "npx http-server public -p 8080"
+  },
+  "keywords": [
+    "opencv",
+    "image-processing",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
+
