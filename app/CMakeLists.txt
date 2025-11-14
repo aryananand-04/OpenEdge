@@ -18,9 +18,38 @@ find_library(android-lib android)
 find_library(EGL-lib EGL)
 find_library(GLESv2-lib GLESv2)
 
-# OpenCV configuration
-set(OpenCV_DIR ${CMAKE_SOURCE_DIR}/../../OpenCV-android-sdk/sdk/native/jni)
+# OpenCV configuration - try multiple possible paths
+set(OpenCV_POSSIBLE_PATHS
+    ${CMAKE_SOURCE_DIR}/../../OpenCV-android-sdk/sdk/native/jni
+    ${CMAKE_SOURCE_DIR}/../../../OpenCV-android-sdk/sdk/native/jni
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../OpenCV-android-sdk/sdk/native/jni
+)
+
+set(OpenCV_DIR "")
+foreach(PATH ${OpenCV_POSSIBLE_PATHS})
+    if(EXISTS "${PATH}/OpenCVConfig.cmake")
+        set(OpenCV_DIR "${PATH}")
+        message(STATUS "Found OpenCV at: ${OpenCV_DIR}")
+        break()
+    endif()
+endforeach()
+
+if(OpenCV_DIR STREQUAL "")
+    message(FATAL_ERROR "OpenCV not found! Please ensure OpenCV-android-sdk is in the project root.")
+    message(FATAL_ERROR "Expected paths:")
+    foreach(PATH ${OpenCV_POSSIBLE_PATHS})
+        message(FATAL_ERROR "  ${PATH}")
+    endforeach()
+endif()
+
 find_package(OpenCV REQUIRED)
+if(OpenCV_FOUND)
+    message(STATUS "OpenCV version: ${OpenCV_VERSION}")
+    message(STATUS "OpenCV libraries: ${OpenCV_LIBS}")
+else()
+    message(FATAL_ERROR "OpenCV package not found after setting OpenCV_DIR")
+endif()
+
 include_directories(${OpenCV_INCLUDE_DIRS})
 
 # Include directories

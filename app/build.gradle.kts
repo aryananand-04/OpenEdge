@@ -5,9 +5,7 @@ plugins {
 
 android {
     namespace = "com.example.openedge"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.openedge"
