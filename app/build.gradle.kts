@@ -5,9 +5,10 @@ plugins {
 
 android {
     namespace = "com.openedge"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 36
+
+    // Specify NDK version
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.openedge"
@@ -17,6 +18,14 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Native build configuration
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            }
+        }
     }
 
     buildTypes {
@@ -28,12 +37,22 @@ android {
             )
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
     kotlinOptions {
         jvmTarget = "11"
+    }
+
+    // Configure CMake
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "4.1.2"
+        }
     }
 }
 
