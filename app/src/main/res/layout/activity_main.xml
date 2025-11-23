@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="#000000"
+    tools:context=".MainActivity">
 
     <android.opengl.GLSurfaceView
         android:id="@+id/glSurfaceView"
@@ -12,36 +15,169 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
+        android:layout_alignParentTop="true"
+        android:background="#AA000000"
         android:orientation="vertical"
-        android:padding="16dp"
-        android:background="#AA000000">
+        android:padding="16dp">
 
         <TextView
-            android:id="@+id/fpsText"
+            android:id="@+id/titleText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="FPS: 0.0"
-            android:textColor="#00FF00"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="8dp"
+            android:shadowColor="#00FFD1"
+            android:shadowRadius="10"
+            android:text="🔬 OpenEdge Vision"
+            android:textColor="#00FFD1"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/fpsText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="FPS: 0.0"
+                android:textColor="#00FF88"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/modeText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="#80FF6B9D"
+                android:padding="4dp"
+                android:text="RAW"
+                android:textColor="#FF6B9D"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/processingTimeText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
             android:text="Processing: 0 ms"
-            android:textColor="#FFFF00"
-            android:textSize="14sp"
-            android:layout_marginBottom="16dp" />
+            android:textColor="#FFD700"
+            android:textSize="14sp" />
 
-        <Button
-            android:id="@+id/toggleButton"
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:background="#CC000000"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Toggle: Edge Detection"
-            android:textAllCaps="false" />
+            android:layout_marginBottom="16dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <!-- FIX: Using standard button background which you can theme -->
+            <Button
+                android:id="@+id/btnRaw"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:text="RAW"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnGrayscale"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:text="GRAY"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnEdges"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_weight="1"
+                android:text="EDGES"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/sensitivityPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:orientation="vertical"
+            android:visibility="gone"
+            tools:visibility="visible"> <!-- tools:visibility makes it visible in editor only -->
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="4dp"
+                android:text="Edge Sensitivity"
+                android:textColor="#00FFD1"
+                android:textSize="14sp" />
+
+            <SeekBar
+                android:id="@+id/sensitivitySlider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="100"
+                android:progress="50"
+                android:progressTint="#00FFD1"
+                android:thumbTint="#00FFD1" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/btnCapture"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginEnd="16dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Capture"
+                android:padding="12dp"
+                android:scaleType="centerInside"
+                app:srcCompat="@android:drawable/ic_menu_camera"
+                app:tint="#FFFFFF" />
+
+            <Button
+                android:id="@+id/toggleButton"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
+                android:text="TOGGLE MODE"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold" />
+
+        </LinearLayout>
 
     </LinearLayout>
 

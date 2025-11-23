@@ -5,12 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
-import android.hardware.camera2.CameraAccessException
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraDevice
-import android.hardware.camera2.CameraManager
-import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.*
 import android.media.ImageReader
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
@@ -30,9 +25,11 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
         private const val TAG = "CameraManager"
         private const val MAX_PREVIEW_WIDTH = 1920
         private const val MAX_PREVIEW_HEIGHT = 1080
+        private const val FPS_SMOOTHING_FRAMES = 10
     }
 
-    private var cameraManager: CameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+    private var cameraManager: android.hardware.camera2.CameraManager =
+        context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
     private var previewSize: Size? = null
@@ -44,12 +41,11 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
     private var previewSurface: Surface? = null
     private var imageReader: ImageReader? = null
 
-    // FPS tracking
-    private val frameTimestamps = ArrayDeque<Long>(60)
-    private var lastFpsUpdateTime = System.nanoTime()
+    private val frameTimestamps = ArrayDeque<Long>(FPS_SMOOTHING_FRAMES)
+    private var lastFpsReportTime = 0L
+    private var frameCount = 0
     private var fpsCallback: ((Double) -> Unit)? = null
 
-    // Edge detection state
     @Volatile
     var edgeDetectionEnabled = false
     private var processedFrameCallback: ((IntArray, Int, Int) -> Unit)? = null
@@ -106,7 +102,7 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
                 )
                 previewSurface?.let { captureRequestBuilder.addTarget(it) }
                 imageReader?.surface?.let { captureRequestBuilder.addTarget(it) }
-                
+
                 captureRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 captureRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
@@ -133,44 +129,41 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
     private val imageAvailableListener = ImageReader.OnImageAvailableListener { reader ->
         val image = reader.acquireLatestImage()
         image?.let {
-            val currentTime = System.nanoTime()
-            
-            // Track FPS from actual frame arrivals
+            val currentTime = System.currentTimeMillis()
+
             frameTimestamps.addLast(currentTime)
-            val twoSecondsAgo = currentTime - 2_000_000_000L
-            while (frameTimestamps.isNotEmpty() && frameTimestamps.first() < twoSecondsAgo) {
+            if (frameTimestamps.size > FPS_SMOOTHING_FRAMES) {
                 frameTimestamps.removeFirst()
             }
-            
-            // Update FPS every 1 second
-            if (currentTime - lastFpsUpdateTime >= 1_000_000_000L) {
-                if (frameTimestamps.size >= 2) {
-                    val timeSpan = frameTimestamps.last() - frameTimestamps.first()
-                    if (timeSpan > 0) {
-                        val fps = (frameTimestamps.size - 1) * 1_000_000_000.0 / timeSpan
-                        fpsCallback?.invoke(fps)
-                    }
-                } else if (frameTimestamps.size == 1) {
-                    val elapsed = currentTime - frameTimestamps.first()
-                    if (elapsed > 0) {
-                        val fps = 1_000_000_000.0 / elapsed
-                        fpsCallback?.invoke(fps)
-                    }
-                } else {
-                    fpsCallback?.invoke(0.0)
-                }
-                lastFpsUpdateTime = currentTime
+
+            frameCount++
+
+            if (currentTime - lastFpsReportTime >= 500) {
+                calculateAndReportFPS(currentTime)
+                lastFpsReportTime = currentTime
             }
-            
-            // Process frame for edge detection if enabled
+
             if (edgeDetectionEnabled && processedFrameCallback != null) {
                 val processed = EdgeDetection.processFrame(it)
                 processed?.let { frame ->
                     processedFrameCallback?.invoke(frame, it.width, it.height)
                 }
             }
-            
+
             it.close()
+        }
+    }
+
+    private fun calculateAndReportFPS(currentTime: Long) {
+        if (frameTimestamps.size < 2) {
+            fpsCallback?.invoke(0.0)
+            return
+        }
+
+        val timeSpan = frameTimestamps.last() - frameTimestamps.first()
+        if (timeSpan > 0) {
+            val fps = ((frameTimestamps.size - 1) * 1000.0) / timeSpan
+            fpsCallback?.invoke(fps)
         }
     }
 
@@ -204,18 +197,16 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
                 width, height, MAX_PREVIEW_WIDTH, MAX_PREVIEW_HEIGHT
             )
 
-            Log.d(TAG, "Selected preview size: $previewSize")
+            Log.d(TAG, "Selected preview size: $previewSize, sensor orientation: $cameraSensorOrientation")
 
-            // Create ImageReader for frame capture
             imageReader = ImageReader.newInstance(
                 previewSize!!.width,
                 previewSize!!.height,
                 ImageFormat.YUV_420_888,
-                2
+                3
             )
             imageReader?.setOnImageAvailableListener(imageAvailableListener, null)
 
-            // Queue texture creation on GL thread
             glSurfaceView.queueEvent {
                 val textures = IntArray(1)
                 GLES20.glGenTextures(1, textures, 0)
@@ -309,7 +300,11 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
     fun closeCamera() {
         try {
             cameraOpenCloseLock.acquire()
-            
+
+            frameTimestamps.clear()
+            frameCount = 0
+            lastFpsReportTime = 0
+
             captureSession?.close()
             captureSession = null
 
@@ -372,9 +367,7 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
         val h = textureViewHeight.coerceAtMost(maxHeight)
 
         for (option in choices) {
-            if (option.width <= maxWidth && option.height <= maxHeight &&
-                option.height == option.width * h / w
-            ) {
+            if (option.width <= maxWidth && option.height <= maxHeight) {
                 if (option.width >= w && option.height >= h) {
                     bigEnough.add(option)
                 } else {
