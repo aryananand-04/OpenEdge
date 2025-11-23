@@ -23,7 +23,7 @@ import androidx.core.content.ContextCompat
 import java.util.*
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-
+import kotlin.math.sqrt
 
 class CameraManager(
     private val context: Context,
@@ -34,6 +34,10 @@ class CameraManager(
         private const val TAG = "CameraManager"
         private const val MIN_PREVIEW_WIDTH = 640
         private const val MIN_PREVIEW_HEIGHT = 480
+    }
+
+    enum class ProcessingMode {
+        RAW, GRAYSCALE, EDGES
     }
 
     private var cameraDevice: CameraDevice? = null
@@ -61,12 +65,15 @@ class CameraManager(
 
     // State management
     @Volatile
-    var edgeDetectionEnabled = false
+    var processingMode = ProcessingMode.RAW
     private var isCameraSessionActive = false
 
     // FPS Calculation
     private var frameCount = 0
     private var lastFpsTimestamp = System.currentTimeMillis()
+
+    // Sensor orientation
+    private var sensorOrientation = 0
 
     // --- Public API for MainActivity ---
 
@@ -84,6 +91,10 @@ class CameraManager(
 
     fun getSurfaceTexture(): SurfaceTexture? {
         return surfaceTexture
+    }
+
+    fun getSensorOrientation(): Int {
+        return sensorOrientation
     }
 
     fun hasCameraPermission(): Boolean {
@@ -115,6 +126,9 @@ class CameraManager(
                 }
 
                 val characteristics = manager.getCameraCharacteristics(cameraId)
+                sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+                Log.d(TAG, "Camera sensor orientation: $sensorOrientation")
+
                 val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                     ?: throw RuntimeException("Cannot get stream configuration map.")
 
@@ -161,7 +175,6 @@ class CameraManager(
             Log.e(TAG, "SurfaceTexture not ready — aborting startPreview() to avoid crash.")
             return
         }
-
 
         surfaceTexture?.setDefaultBufferSize(previewSize.width, previewSize.height)
         val surface = Surface(surfaceTexture)
@@ -218,11 +231,9 @@ class CameraManager(
                     captureSession = null
                     cameraDevice?.close()
                     cameraDevice = null
-                    // imageReader is lateinit — guard before closing
                     if (::imageReader.isInitialized) {
                         imageReader.close()
                     }
-                    // release SurfaceTexture if present
                     surfaceTexture?.release()
                     surfaceTexture = null
                 } catch (e: Exception) {
@@ -230,7 +241,6 @@ class CameraManager(
                 }
             }
         } else {
-            // still try to release resources if they exist
             try {
                 captureSession?.close()
                 captureSession = null
@@ -260,7 +270,7 @@ class CameraManager(
         cameraThread?.quitSafely()
         imageReaderThread?.quitSafely()
         try {
-            cameraThread?.join(500) // Wait max 500ms for thread to die
+            cameraThread?.join(500)
             cameraThread = null
             cameraHandler = null
             imageReaderThread?.join(500)
@@ -274,7 +284,6 @@ class CameraManager(
     // --- Surface and ImageReader Setup ---
 
     private fun setupSurfaceTexture(): Boolean {
-        // If already created, return quickly
         if (surfaceTexture != null) return true
 
         val latch = CountDownLatch(1)
@@ -284,6 +293,7 @@ class CameraManager(
             try {
                 GLES20.glGenTextures(1, textures, 0)
                 cameraTextureId = textures[0]
+                Log.d(TAG, "✅ Created camera texture ID: $cameraTextureId")
                 surfaceTexture = SurfaceTexture(cameraTextureId).also {
                     it.setOnFrameAvailableListener {
                         glSurfaceView.requestRender()
@@ -310,7 +320,6 @@ class CameraManager(
         }
     }
 
-
     private fun setupImageReader() {
         imageReader = ImageReader.newInstance(previewSize.width, previewSize.height, ImageFormat.YUV_420_888, 2)
         imageReader.setOnImageAvailableListener({ reader ->
@@ -318,9 +327,19 @@ class CameraManager(
 
             calculateFps()
 
-            if (edgeDetectionEnabled) {
-                val pixels = convertYUVToGrayscale(image)
-                processedFrameCallback?.invoke(pixels, image.width, image.height)
+            when (processingMode) {
+                ProcessingMode.GRAYSCALE -> {
+                    val pixels = convertYUVToGrayscale(image)
+                    processedFrameCallback?.invoke(pixels, image.width, image.height)
+                }
+                ProcessingMode.EDGES -> {
+                    val grayscale = convertYUVToGrayscale(image)
+                    val edges = detectEdges(grayscale, image.width, image.height)
+                    processedFrameCallback?.invoke(edges, image.width, image.height)
+                }
+                ProcessingMode.RAW -> {
+                    // Do nothing, just show camera feed
+                }
             }
 
             image.close()
@@ -358,14 +377,13 @@ class CameraManager(
         }
         return when {
             bigEnough.isNotEmpty() -> Collections.min(bigEnough, CompareSizesByArea())
-            choices.isNotEmpty() -> choices[0] // Fallback
+            choices.isNotEmpty() -> choices[0]
             else -> Size(MIN_PREVIEW_WIDTH, MIN_PREVIEW_HEIGHT)
         }
     }
 
     private class CompareSizesByArea : Comparator<Size> {
         override fun compare(lhs: Size, rhs: Size): Int {
-            // Correctly compare the area of two sizes
             return (lhs.width.toLong() * lhs.height).compareTo(rhs.width.toLong() * rhs.height)
         }
     }
@@ -373,13 +391,52 @@ class CameraManager(
     private fun convertYUVToGrayscale(image: android.media.Image): IntArray {
         val yPlane = image.planes[0]
         val yBuffer = yPlane.buffer
-        // make sure buffer position is at 0 before reading indexed bytes
         yBuffer.rewind()
-        val pixels = IntArray(image.width * image.height)
-        for (i in pixels.indices) {
-            val y = yBuffer.get(i).toInt() and 0xFF
-            pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
+        val width = image.width
+        val height = image.height
+        val pixels = IntArray(width * height)
+
+        // Flip horizontally while converting
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val srcIdx = y * width + x
+                val dstIdx = y * width + (width - 1 - x) // Flip horizontally
+                val yValue = yBuffer.get(srcIdx).toInt() and 0xFF
+                pixels[dstIdx] = (0xFF shl 24) or (yValue shl 16) or (yValue shl 8) or yValue
+            }
         }
         return pixels
+    }
+
+    private fun detectEdges(pixels: IntArray, width: Int, height: Int): IntArray {
+        val output = IntArray(pixels.size)
+
+        // Simple Sobel edge detection
+        for (y in 1 until height - 1) {
+            for (x in 1 until width - 1) {
+                val idx = y * width + x
+
+                // Get grayscale values (they're all the same in R,G,B)
+                val p1 = (pixels[idx - width - 1] shr 16) and 0xFF
+                val p2 = (pixels[idx - width] shr 16) and 0xFF
+                val p3 = (pixels[idx - width + 1] shr 16) and 0xFF
+                val p4 = (pixels[idx - 1] shr 16) and 0xFF
+                val p6 = (pixels[idx + 1] shr 16) and 0xFF
+                val p7 = (pixels[idx + width - 1] shr 16) and 0xFF
+                val p8 = (pixels[idx + width] shr 16) and 0xFF
+                val p9 = (pixels[idx + width + 1] shr 16) and 0xFF
+
+                // Sobel kernels
+                val gx = -p1 - 2 * p4 - p7 + p3 + 2 * p6 + p9
+                val gy = -p1 - 2 * p2 - p3 + p7 + 2 * p8 + p9
+
+                val magnitude = sqrt((gx * gx + gy * gy).toDouble()).toInt()
+                val edge = magnitude.coerceIn(0, 255)
+
+                output[idx] = (0xFF shl 24) or (edge shl 16) or (edge shl 8) or edge
+            }
+        }
+
+        return output
     }
 }

@@ -16,8 +16,6 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.openedge.camera.CameraManager
-import com.openedge.gl.CameraRenderer
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -41,8 +39,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var sensitivityPanel: LinearLayout
     private lateinit var sensitivitySlider: SeekBar
 
-    private var cameraManager: CameraManager? = null
-    private var cameraRenderer: CameraRenderer? = null
+    private var cameraManager: com.openedge.camera.CameraManager? = null
+    private var cameraRenderer: com.openedge.gl.CameraRenderer? = null
 
     private var currentMode = 0
 
@@ -52,9 +50,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Init vibrator in a compatibility-safe way
         vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // Typed API available from M
             getSystemService(Vibrator::class.java) ?: throw IllegalStateException("No vibrator available")
         } else {
             @Suppress("DEPRECATION")
@@ -81,20 +77,20 @@ class MainActivity : AppCompatActivity() {
         glSurfaceView.setEGLContextClientVersion(2)
         glSurfaceView.preserveEGLContextOnPause = true
 
-        cameraRenderer = CameraRenderer()
+        cameraRenderer = com.openedge.gl.CameraRenderer()
         cameraRenderer?.setGLSurfaceView(glSurfaceView)
+
         glSurfaceView.setRenderer(cameraRenderer)
 
-        // FIX: Use RENDERMODE_WHEN_DIRTY for efficiency. The renderer will request a render when needed.
+        // Use RENDERMODE_WHEN_DIRTY - camera will call requestRender() when frames are ready
         glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
 
         // --- Setup Camera Manager and Callbacks ---
-        cameraManager = CameraManager(this, glSurfaceView)
+        cameraManager = com.openedge.camera.CameraManager(this, glSurfaceView)
 
-        cameraManager?.setFpsCallback { fps ->
+        cameraManager?.setFpsCallback { fps: Float ->
             runOnUiThread {
-                // Use Locale-aware formatting for user-facing text
-                fpsText.text = "FPS: ${String.format(Locale.getDefault(), "%.1f", fps)}"
+                fpsText.text = String.format(Locale.getDefault(), "FPS: %.1f", fps)
 
                 val color = when {
                     fps >= 25 -> 0xFF00FF88.toInt()
@@ -105,20 +101,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        cameraManager?.setProcessedFrameCallback { pixels, width, height ->
+        cameraManager?.setProcessedFrameCallback { pixels: IntArray, width: Int, height: Int ->
             cameraRenderer?.updateProcessedTexture(pixels, width, height)
         }
 
-        cameraManager?.setOnCameraReadyCallback { textureId ->
+        cameraManager?.setOnCameraReadyCallback { textureId: Int ->
             val surfaceTexture = cameraManager?.getSurfaceTexture() ?: return@setOnCameraReadyCallback
             cameraRenderer?.setSurfaceTexture(surfaceTexture, textureId)
-            // Renderer handles rotation/viewport updates itself
+
+            // Set the correct rotation based on camera sensor orientation
+            val sensorOrientation = cameraManager?.getSensorOrientation() ?: 0
+            cameraRenderer?.cameraRotation = -sensorOrientation // Negative to counter-rotate
         }
 
         // --- Setup UI Listeners ---
         setupClickListeners()
 
-        setMode(0) // Set initial mode
+        setMode(0)
         checkCameraPermission()
     }
 
@@ -161,9 +160,15 @@ class MainActivity : AppCompatActivity() {
     private fun setMode(mode: Int) {
         currentMode = mode
 
-        val enabled = mode > 0
-        cameraManager?.edgeDetectionEnabled = enabled
-        cameraRenderer?.edgeDetectionEnabled = enabled
+        val processingMode = when (mode) {
+            0 -> com.openedge.camera.CameraManager.ProcessingMode.RAW
+            1 -> com.openedge.camera.CameraManager.ProcessingMode.GRAYSCALE
+            2 -> com.openedge.camera.CameraManager.ProcessingMode.EDGES
+            else -> com.openedge.camera.CameraManager.ProcessingMode.RAW
+        }
+
+        cameraManager?.processingMode = processingMode
+        cameraRenderer?.edgeDetectionEnabled = (mode > 0)
 
         val modeNames = arrayOf("RAW", "GRAY", "EDGES")
         val modeColors = arrayOf(0xFF5555FF.toInt(), 0xFF888888.toInt(), 0xFF00FFD1.toInt())
@@ -240,8 +245,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun captureFrame() {
-        // TODO: Implement frame capture logic here.
-        // This would involve getting the frame from CameraManager or reading pixels from the GL context.
         Toast.makeText(this, "📸 Frame capture not implemented!", Toast.LENGTH_SHORT).show()
     }
 
@@ -250,16 +253,16 @@ class MainActivity : AppCompatActivity() {
         glSurfaceView.onResume()
 
         if (cameraManager?.hasCameraPermission() == true) {
-            glSurfaceView.post {
-                cameraManager?.onResume(glSurfaceView.width, glSurfaceView.height)
-                // Renderer handles rotation/viewport updates itself
-            }
+            glSurfaceView.postDelayed({
+                if (glSurfaceView.width > 0 && glSurfaceView.height > 0) {
+                    cameraManager?.onResume(glSurfaceView.width, glSurfaceView.height)
+                }
+            }, 100)
         }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // Requesting a render is enough to let the renderer update its viewport if needed.
         glSurfaceView.requestRender()
     }
 
@@ -271,8 +274,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Use the public lifecycle method instead of calling a private closeCamera()
-        cameraManager?.onPause()
+        // onPause() already handles cleanup, no need to call it again
     }
 
     private fun checkCameraPermission() {
@@ -286,10 +288,11 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == CAMERA_PERMISSION_CODE) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "✅ Camera ready!", Toast.LENGTH_SHORT).show()
-                // Start the camera now that permission is granted
-                glSurfaceView.post {
-                    cameraManager?.onResume(glSurfaceView.width, glSurfaceView.height)
-                }
+                glSurfaceView.postDelayed({
+                    if (glSurfaceView.width > 0 && glSurfaceView.height > 0) {
+                        cameraManager?.onResume(glSurfaceView.width, glSurfaceView.height)
+                    }
+                }, 100)
             } else {
                 Toast.makeText(this, "❌ Camera permission is required to use this app.", Toast.LENGTH_LONG).show()
             }
