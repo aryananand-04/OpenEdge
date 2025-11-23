@@ -31,6 +31,12 @@ captures/
 # --- Heavy SDKs you installed manually ---
 OpenCV-android-sdk/
 
+# --- Web project build output ---
+web/node_modules/
+web/dist/
+node_modules/
+dist/
+
 # --- Gradle wrapper (these must stay tracked) ---
 !gradle/wrapper/gradle-wrapper.jar
 !gradle/wrapper/gradle-wrapper.properties
