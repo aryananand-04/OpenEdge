@@ -24,6 +24,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     external fun stringFromJNI(): String
+    
+    // Initialize edge detection
+    init {
+        com.openedge.processing.EdgeDetection // Force initialization
+    }
 
     private lateinit var fpsText: TextView
     private lateinit var processingTimeText: TextView
@@ -49,24 +54,43 @@ class MainActivity : AppCompatActivity() {
 
         // Set up renderer
         cameraRenderer = CameraRenderer()
+        cameraRenderer?.setGLSurfaceView(glSurfaceView)
         glSurfaceView.setRenderer(cameraRenderer)
-        glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+        glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
 
-        toggleButton.setOnClickListener {
-            Toast.makeText(this, "Toggle clicked!", Toast.LENGTH_SHORT).show()
+        // Initialize CameraManager
+        cameraManager = CameraManager(this, glSurfaceView)
+        
+        // Set FPS callback from CameraManager (real frame times)
+        cameraManager?.setFpsCallback { fps ->
+            runOnUiThread {
+                fpsText.text = "FPS: ${String.format("%.1f", fps)}"
+            }
+        }
+        
+        // Set processed frame callback - send to renderer
+        cameraManager?.setProcessedFrameCallback { pixels, width, height ->
+            cameraRenderer?.updateProcessedTexture(pixels, width, height)
         }
 
-        // Initialize CameraManager and connect to renderer
-        cameraManager = CameraManager(this, glSurfaceView)
+        // Wire up toggle button
+        toggleButton.setOnClickListener {
+            val newState = !(cameraManager?.edgeDetectionEnabled ?: false)
+            cameraManager?.edgeDetectionEnabled = newState
+            cameraRenderer?.edgeDetectionEnabled = newState
+            toggleButton.text = if (newState) {
+                "Toggle: Raw Camera"
+            } else {
+                "Toggle: Edge Detection"
+            }
+        }
+
+        // Set camera ready callback
         cameraManager?.setOnCameraReadyCallback { textureId ->
             val surfaceTexture = cameraManager?.getSurfaceTexture() ?: return@setOnCameraReadyCallback
             cameraRenderer?.setSurfaceTexture(surfaceTexture, textureId)
-            // Set orientation info after camera is ready
-            cameraRenderer?.setOrientationInfo(
-                cameraManager?.getCameraSensorOrientation() ?: 0,
-                cameraManager?.getDisplayRotation() ?: 0,
-                cameraManager?.getCameraFacing()
-            )
+            // Update display rotation
+            cameraRenderer?.setDisplayRotation(cameraManager?.getDisplayRotation() ?: 0)
         }
         
         checkCameraPermission()
@@ -76,15 +100,9 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         if (cameraManager?.hasCameraPermission() == true) {
             glSurfaceView.onResume()
-            // Use view dimensions, but queue after layout
             glSurfaceView.post {
                 cameraManager?.onResume(glSurfaceView.width, glSurfaceView.height)
-                // Update orientation when camera resumes
-                cameraRenderer?.setOrientationInfo(
-                    cameraManager?.getCameraSensorOrientation() ?: 0,
-                    cameraManager?.getDisplayRotation() ?: 0,
-                    cameraManager?.getCameraFacing()
-                )
+                cameraRenderer?.setDisplayRotation(cameraManager?.getDisplayRotation() ?: 0)
             }
         }
     }
@@ -93,11 +111,7 @@ class MainActivity : AppCompatActivity() {
         super.onConfigurationChanged(newConfig)
         // Update orientation when device rotates
         glSurfaceView.post {
-            cameraRenderer?.setOrientationInfo(
-                cameraManager?.getCameraSensorOrientation() ?: 0,
-                cameraManager?.getDisplayRotation() ?: 0,
-                cameraManager?.getCameraFacing()
-            )
+            cameraRenderer?.setDisplayRotation(cameraManager?.getDisplayRotation() ?: 0)
             glSurfaceView.requestRender()
         }
     }
@@ -133,7 +147,6 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == CAMERA_PERMISSION_CODE) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "Camera permission granted", Toast.LENGTH_SHORT).show()
-                // Start camera after permission is granted
                 glSurfaceView.post {
                     cameraManager?.onResume(glSurfaceView.width, glSurfaceView.height)
                 }

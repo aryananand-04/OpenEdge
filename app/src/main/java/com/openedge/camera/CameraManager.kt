@@ -17,10 +17,10 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.util.Log
 import android.util.Size
-import android.view.Display
 import android.view.Surface
 import android.view.WindowManager
 import androidx.core.content.ContextCompat
+import com.openedge.processing.EdgeDetection
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
@@ -38,12 +38,21 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
     private var previewSize: Size? = null
     private var cameraId: String? = null
     private var cameraSensorOrientation: Int = 0
-    private var cameraCharacteristics: CameraCharacteristics? = null
 
     private val cameraOpenCloseLock = Semaphore(1)
     private var surfaceTexture: SurfaceTexture? = null
     private var previewSurface: Surface? = null
     private var imageReader: ImageReader? = null
+
+    // FPS tracking
+    private val frameTimestamps = ArrayDeque<Long>(60)
+    private var lastFpsUpdateTime = System.nanoTime()
+    private var fpsCallback: ((Double) -> Unit)? = null
+
+    // Edge detection state
+    @Volatile
+    var edgeDetectionEnabled = false
+    private var processedFrameCallback: ((IntArray, Int, Int) -> Unit)? = null
 
     fun interface OnCameraReadyCallback {
         fun onCameraReady(textureId: Int)
@@ -53,6 +62,14 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
 
     fun setOnCameraReadyCallback(callback: OnCameraReadyCallback) {
         cameraReadyCallback = callback
+    }
+
+    fun setFpsCallback(callback: (Double) -> Unit) {
+        fpsCallback = callback
+    }
+
+    fun setProcessedFrameCallback(callback: (IntArray, Int, Int) -> Unit) {
+        processedFrameCallback = callback
     }
 
     private val stateCallback = object : CameraDevice.StateCallback() {
@@ -88,7 +105,6 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
                     CameraDevice.TEMPLATE_PREVIEW
                 )
                 previewSurface?.let { captureRequestBuilder.addTarget(it) }
-                // Add ImageReader as target to receive frames
                 imageReader?.surface?.let { captureRequestBuilder.addTarget(it) }
                 
                 captureRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
@@ -117,13 +133,43 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
     private val imageAvailableListener = ImageReader.OnImageAvailableListener { reader ->
         val image = reader.acquireLatestImage()
         image?.let {
-            // Frame is available here - you can process it
-            // For now, just release it to keep the pipeline flowing
-            val planes = it.planes
-            if (planes.isNotEmpty()) {
-                // Frame data available in planes[0].buffer
-                // Process frame here if needed
+            val currentTime = System.nanoTime()
+            
+            // Track FPS from actual frame arrivals
+            frameTimestamps.addLast(currentTime)
+            val twoSecondsAgo = currentTime - 2_000_000_000L
+            while (frameTimestamps.isNotEmpty() && frameTimestamps.first() < twoSecondsAgo) {
+                frameTimestamps.removeFirst()
             }
+            
+            // Update FPS every 1 second
+            if (currentTime - lastFpsUpdateTime >= 1_000_000_000L) {
+                if (frameTimestamps.size >= 2) {
+                    val timeSpan = frameTimestamps.last() - frameTimestamps.first()
+                    if (timeSpan > 0) {
+                        val fps = (frameTimestamps.size - 1) * 1_000_000_000.0 / timeSpan
+                        fpsCallback?.invoke(fps)
+                    }
+                } else if (frameTimestamps.size == 1) {
+                    val elapsed = currentTime - frameTimestamps.first()
+                    if (elapsed > 0) {
+                        val fps = 1_000_000_000.0 / elapsed
+                        fpsCallback?.invoke(fps)
+                    }
+                } else {
+                    fpsCallback?.invoke(0.0)
+                }
+                lastFpsUpdateTime = currentTime
+            }
+            
+            // Process frame for edge detection if enabled
+            if (edgeDetectionEnabled && processedFrameCallback != null) {
+                val processed = EdgeDetection.processFrame(it)
+                processed?.let { frame ->
+                    processedFrameCallback?.invoke(frame, it.width, it.height)
+                }
+            }
+            
             it.close()
         }
     }
@@ -142,21 +188,17 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
         }
 
         try {
-            // Find back camera
             cameraId = getBackCameraId()
             if (cameraId == null) {
                 Log.e(TAG, "No back camera found")
                 return
             }
 
-            // Get camera characteristics
             val characteristics = cameraManager.getCameraCharacteristics(cameraId!!)
-            cameraCharacteristics = characteristics
             cameraSensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
             val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                 ?: return
 
-            // Choose preview size
             previewSize = chooseOptimalSize(
                 map.getOutputSizes(SurfaceTexture::class.java),
                 width, height, MAX_PREVIEW_WIDTH, MAX_PREVIEW_HEIGHT
@@ -173,9 +215,8 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
             )
             imageReader?.setOnImageAvailableListener(imageAvailableListener, null)
 
-            // Queue texture creation and SurfaceTexture setup on GL thread
+            // Queue texture creation on GL thread
             glSurfaceView.queueEvent {
-                // Generate texture ID on GL thread
                 val textures = IntArray(1)
                 GLES20.glGenTextures(1, textures, 0)
                 val textureId = textures[0]
@@ -202,22 +243,16 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
                     GLES20.GL_CLAMP_TO_EDGE
                 )
 
-                // Create SurfaceTexture with the texture ID
                 surfaceTexture = SurfaceTexture(textureId)
                 surfaceTexture?.setDefaultBufferSize(previewSize!!.width, previewSize!!.height)
                 surfaceTexture?.setOnFrameAvailableListener {
-                    // Request render when new frame is available
                     glSurfaceView.requestRender()
                 }
                 previewSurface = Surface(surfaceTexture)
 
-                // Notify callback that texture is ready
                 cameraReadyCallback?.onCameraReady(textureId)
-
-                // Request render to initialize the surface
                 glSurfaceView.requestRender()
 
-                // Now open the camera on main thread
                 glSurfaceView.post {
                     openCameraInternal()
                 }
@@ -253,14 +288,12 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
 
             val surfaces = mutableListOf<Surface>()
             previewSurface?.let { surfaces.add(it) }
-            // Add ImageReader surface to capture frames
             imageReader?.surface?.let { surfaces.add(it) }
 
             val captureRequestBuilder = cameraDevice!!.createCaptureRequest(
                 CameraDevice.TEMPLATE_PREVIEW
             )
             previewSurface?.let { captureRequestBuilder.addTarget(it) }
-            // Add ImageReader as target to receive frames
             imageReader?.surface?.let { captureRequestBuilder.addTarget(it) }
 
             cameraDevice!!.createCaptureSession(
@@ -332,9 +365,7 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
         maxWidth: Int,
         maxHeight: Int
     ): Size {
-        // Collect the supported resolutions that are at least as big as the preview Surface
         val bigEnough = mutableListOf<Size>()
-        // Collect the supported resolutions that are smaller than the preview Surface
         val notBigEnough = mutableListOf<Size>()
 
         val w = textureViewWidth.coerceAtMost(maxWidth)
@@ -354,15 +385,12 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
 
         return when {
             bigEnough.isNotEmpty() -> {
-                // Pick the smallest of those big enough
                 bigEnough.minByOrNull { it.width * it.height } ?: choices[0]
             }
             notBigEnough.isNotEmpty() -> {
-                // Pick the largest of those not big enough
                 notBigEnough.maxByOrNull { it.width * it.height } ?: choices[0]
             }
             else -> {
-                // Return the first available size
                 choices[0]
             }
         }
@@ -370,9 +398,6 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
 
     fun getSurfaceTexture(): SurfaceTexture? = surfaceTexture
     fun getPreviewSize(): Size? = previewSize
-    
-    fun getCameraSensorOrientation(): Int = cameraSensorOrientation
-    
     fun getDisplayRotation(): Int {
         val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val display = windowManager.defaultDisplay
@@ -383,9 +408,5 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
             Surface.ROTATION_270 -> 270
             else -> 0
         }
-    }
-    
-    fun getCameraFacing(): Int? {
-        return cameraCharacteristics?.get(CameraCharacteristics.LENS_FACING)
     }
 }
