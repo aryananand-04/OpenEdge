@@ -16,4 +16,4 @@ local.properties
 
 # Web dependencies
 web/node_modules/
-web/package-lock.json
+web/package-lock.jsonOpenCV-android-sdk/
