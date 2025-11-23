@@ -5,62 +5,72 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
-import android.hardware.camera2.*
+import android.hardware.camera2.CameraAccessException
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager as AndroidCameraManager
+import android.hardware.camera2.CaptureRequest
 import android.media.ImageReader
-import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
+import android.os.Handler
+import android.os.HandlerThread
 import android.util.Log
 import android.util.Size
 import android.view.Surface
-import android.view.WindowManager
 import androidx.core.content.ContextCompat
-import com.openedge.processing.EdgeDetection
-import java.util.concurrent.Semaphore
+import java.util.*
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-class CameraManager(private val context: Context, private val glSurfaceView: GLSurfaceView) {
+
+class CameraManager(
+    private val context: Context,
+    private val glSurfaceView: GLSurfaceView
+) {
 
     companion object {
         private const val TAG = "CameraManager"
-        private const val MAX_PREVIEW_WIDTH = 1920
-        private const val MAX_PREVIEW_HEIGHT = 1080
-        private const val FPS_SMOOTHING_FRAMES = 10
+        private const val MIN_PREVIEW_WIDTH = 640
+        private const val MIN_PREVIEW_HEIGHT = 480
     }
 
-    private var cameraManager: android.hardware.camera2.CameraManager =
-        context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
-    private var previewSize: Size? = null
-    private var cameraId: String? = null
-    private var cameraSensorOrientation: Int = 0
+    private lateinit var previewSize: Size
 
-    private val cameraOpenCloseLock = Semaphore(1)
+    // Threads and Handlers for safe, non-blocking camera operations
+    private var cameraThread: HandlerThread? = null
+    private var cameraHandler: Handler? = null
+    private var imageReaderThread: HandlerThread? = null
+    private var imageReaderHandler: Handler? = null
+
+    private lateinit var imageReader: ImageReader
     private var surfaceTexture: SurfaceTexture? = null
-    private var previewSurface: Surface? = null
-    private var imageReader: ImageReader? = null
+    private var cameraTextureId: Int = 0
 
-    private val frameTimestamps = ArrayDeque<Long>(FPS_SMOOTHING_FRAMES)
-    private var lastFpsReportTime = 0L
-    private var frameCount = 0
-    private var fpsCallback: ((Double) -> Unit)? = null
+    // Hold builder and request so session callback can access them
+    private var captureRequestBuilder: CaptureRequest.Builder? = null
+    private var captureRequest: CaptureRequest? = null
 
+    // Callbacks to communicate with MainActivity
+    private var fpsCallback: ((Float) -> Unit)? = null
+    private var processedFrameCallback: ((IntArray, Int, Int) -> Unit)? = null
+    private var onCameraReadyCallback: ((Int) -> Unit)? = null
+
+    // State management
     @Volatile
     var edgeDetectionEnabled = false
-    private var processedFrameCallback: ((IntArray, Int, Int) -> Unit)? = null
+    private var isCameraSessionActive = false
 
-    fun interface OnCameraReadyCallback {
-        fun onCameraReady(textureId: Int)
-    }
+    // FPS Calculation
+    private var frameCount = 0
+    private var lastFpsTimestamp = System.currentTimeMillis()
 
-    private var cameraReadyCallback: OnCameraReadyCallback? = null
+    // --- Public API for MainActivity ---
 
-    fun setOnCameraReadyCallback(callback: OnCameraReadyCallback) {
-        cameraReadyCallback = callback
-    }
-
-    fun setFpsCallback(callback: (Double) -> Unit) {
+    fun setFpsCallback(callback: (Float) -> Unit) {
         fpsCallback = callback
     }
 
@@ -68,338 +78,308 @@ class CameraManager(private val context: Context, private val glSurfaceView: GLS
         processedFrameCallback = callback
     }
 
-    private val stateCallback = object : CameraDevice.StateCallback() {
-        override fun onOpened(camera: CameraDevice) {
-            cameraOpenCloseLock.release()
-            cameraDevice = camera
-            Log.d(TAG, "Camera opened: ${camera.id}")
-            createCameraPreviewSession()
-        }
-
-        override fun onDisconnected(camera: CameraDevice) {
-            cameraOpenCloseLock.release()
-            camera.close()
-            cameraDevice = null
-            Log.d(TAG, "Camera disconnected")
-        }
-
-        override fun onError(camera: CameraDevice, error: Int) {
-            cameraOpenCloseLock.release()
-            camera.close()
-            cameraDevice = null
-            Log.e(TAG, "Camera error: $error")
-        }
+    fun setOnCameraReadyCallback(callback: (Int) -> Unit) {
+        onCameraReadyCallback = callback
     }
 
-    private val captureStateCallback = object : CameraCaptureSession.StateCallback() {
-        override fun onConfigured(session: CameraCaptureSession) {
-            if (cameraDevice == null) return
-
-            captureSession = session
-            try {
-                val captureRequestBuilder = cameraDevice!!.createCaptureRequest(
-                    CameraDevice.TEMPLATE_PREVIEW
-                )
-                previewSurface?.let { captureRequestBuilder.addTarget(it) }
-                imageReader?.surface?.let { captureRequestBuilder.addTarget(it) }
-
-                captureRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                captureRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
-                    CaptureRequest.CONTROL_AE_MODE_ON)
-
-                val captureRequest = captureRequestBuilder.build()
-                session.setRepeatingRequest(captureRequest, null, null)
-                Log.d(TAG, "Camera preview started")
-            } catch (e: CameraAccessException) {
-                Log.e(TAG, "Failed to start camera preview", e)
-            }
-        }
-
-        override fun onConfigureFailed(session: CameraCaptureSession) {
-            Log.e(TAG, "Failed to configure camera session")
-        }
-
-        override fun onClosed(session: CameraCaptureSession) {
-            captureSession = null
-            Log.d(TAG, "Camera session closed")
-        }
-    }
-
-    private val imageAvailableListener = ImageReader.OnImageAvailableListener { reader ->
-        val image = reader.acquireLatestImage()
-        image?.let {
-            val currentTime = System.currentTimeMillis()
-
-            frameTimestamps.addLast(currentTime)
-            if (frameTimestamps.size > FPS_SMOOTHING_FRAMES) {
-                frameTimestamps.removeFirst()
-            }
-
-            frameCount++
-
-            if (currentTime - lastFpsReportTime >= 500) {
-                calculateAndReportFPS(currentTime)
-                lastFpsReportTime = currentTime
-            }
-
-            if (edgeDetectionEnabled && processedFrameCallback != null) {
-                val processed = EdgeDetection.processFrame(it)
-                processed?.let { frame ->
-                    processedFrameCallback?.invoke(frame, it.width, it.height)
-                }
-            }
-
-            it.close()
-        }
-    }
-
-    private fun calculateAndReportFPS(currentTime: Long) {
-        if (frameTimestamps.size < 2) {
-            fpsCallback?.invoke(0.0)
-            return
-        }
-
-        val timeSpan = frameTimestamps.last() - frameTimestamps.first()
-        if (timeSpan > 0) {
-            val fps = ((frameTimestamps.size - 1) * 1000.0) / timeSpan
-            fpsCallback?.invoke(fps)
-        }
+    fun getSurfaceTexture(): SurfaceTexture? {
+        return surfaceTexture
     }
 
     fun hasCameraPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.CAMERA
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-
-    fun openCamera(width: Int, height: Int) {
-        if (!hasCameraPermission()) {
-            Log.e(TAG, "Camera permission not granted")
-            return
-        }
-
-        try {
-            cameraId = getBackCameraId()
-            if (cameraId == null) {
-                Log.e(TAG, "No back camera found")
-                return
-            }
-
-            val characteristics = cameraManager.getCameraCharacteristics(cameraId!!)
-            cameraSensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-            val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                ?: return
-
-            previewSize = chooseOptimalSize(
-                map.getOutputSizes(SurfaceTexture::class.java),
-                width, height, MAX_PREVIEW_WIDTH, MAX_PREVIEW_HEIGHT
-            )
-
-            Log.d(TAG, "Selected preview size: $previewSize, sensor orientation: $cameraSensorOrientation")
-
-            imageReader = ImageReader.newInstance(
-                previewSize!!.width,
-                previewSize!!.height,
-                ImageFormat.YUV_420_888,
-                3
-            )
-            imageReader?.setOnImageAvailableListener(imageAvailableListener, null)
-
-            glSurfaceView.queueEvent {
-                val textures = IntArray(1)
-                GLES20.glGenTextures(1, textures, 0)
-                val textureId = textures[0]
-
-                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
-                GLES20.glTexParameteri(
-                    GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
-                    GLES20.GL_TEXTURE_MIN_FILTER,
-                    GLES20.GL_LINEAR
-                )
-                GLES20.glTexParameteri(
-                    GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
-                    GLES20.GL_TEXTURE_MAG_FILTER,
-                    GLES20.GL_LINEAR
-                )
-                GLES20.glTexParameteri(
-                    GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
-                    GLES20.GL_TEXTURE_WRAP_S,
-                    GLES20.GL_CLAMP_TO_EDGE
-                )
-                GLES20.glTexParameteri(
-                    GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
-                    GLES20.GL_TEXTURE_WRAP_T,
-                    GLES20.GL_CLAMP_TO_EDGE
-                )
-
-                surfaceTexture = SurfaceTexture(textureId)
-                surfaceTexture?.setDefaultBufferSize(previewSize!!.width, previewSize!!.height)
-                surfaceTexture?.setOnFrameAvailableListener {
-                    glSurfaceView.requestRender()
-                }
-                previewSurface = Surface(surfaceTexture)
-
-                cameraReadyCallback?.onCameraReady(textureId)
-                glSurfaceView.requestRender()
-
-                glSurfaceView.post {
-                    openCameraInternal()
-                }
-            }
-        } catch (e: CameraAccessException) {
-            Log.e(TAG, "Failed to access camera", e)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to open camera", e)
-        }
-    }
-
-    private fun openCameraInternal() {
-        try {
-            if (!cameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
-                throw RuntimeException("Time out waiting to lock camera opening")
-            }
-
-            cameraManager.openCamera(cameraId!!, stateCallback, null)
-        } catch (e: CameraAccessException) {
-            Log.e(TAG, "Failed to open camera", e)
-            cameraOpenCloseLock.release()
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Security exception opening camera", e)
-            cameraOpenCloseLock.release()
-        } catch (e: InterruptedException) {
-            throw RuntimeException("Interrupted while trying to lock camera opening", e)
-        }
-    }
-
-    private fun createCameraPreviewSession() {
-        try {
-            previewSurface ?: return
-
-            val surfaces = mutableListOf<Surface>()
-            previewSurface?.let { surfaces.add(it) }
-            imageReader?.surface?.let { surfaces.add(it) }
-
-            val captureRequestBuilder = cameraDevice!!.createCaptureRequest(
-                CameraDevice.TEMPLATE_PREVIEW
-            )
-            previewSurface?.let { captureRequestBuilder.addTarget(it) }
-            imageReader?.surface?.let { captureRequestBuilder.addTarget(it) }
-
-            cameraDevice!!.createCaptureSession(
-                surfaces,
-                captureStateCallback,
-                null
-            )
-        } catch (e: CameraAccessException) {
-            Log.e(TAG, "Failed to create camera session", e)
-        }
-    }
-
-    fun closeCamera() {
-        try {
-            cameraOpenCloseLock.acquire()
-
-            frameTimestamps.clear()
-            frameCount = 0
-            lastFpsReportTime = 0
-
-            captureSession?.close()
-            captureSession = null
-
-            cameraDevice?.close()
-            cameraDevice = null
-
-            surfaceTexture?.release()
-            surfaceTexture = null
-            previewSurface?.release()
-            previewSurface = null
-
-            imageReader?.close()
-            imageReader = null
-
-            cameraOpenCloseLock.release()
-            Log.d(TAG, "Camera closed")
-        } catch (e: InterruptedException) {
-            throw RuntimeException("Interrupted while closing camera", e)
-        }
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     }
 
     fun onResume(width: Int, height: Int) {
-        if (hasCameraPermission() && cameraDevice == null) {
+        startBackgroundThreads()
+        if (hasCameraPermission() && !isCameraSessionActive) {
             openCamera(width, height)
         }
     }
 
     fun onPause() {
         closeCamera()
+        stopBackgroundThreads()
     }
 
-    private fun getBackCameraId(): String? {
-        return try {
-            val cameraIds = cameraManager.cameraIdList
-            for (id in cameraIds) {
-                val characteristics = cameraManager.getCameraCharacteristics(id)
-                val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
-                if (facing == CameraCharacteristics.LENS_FACING_BACK) {
-                    return id
+    // --- Camera Lifecycle and State Management ---
+
+    private fun openCamera(width: Int, height: Int) {
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as AndroidCameraManager
+        cameraHandler?.post {
+            try {
+                val cameraId = getBackFacingCameraId(manager)
+                if (cameraId == null) {
+                    Log.e(TAG, "No back-facing camera found.")
+                    return@post
                 }
+
+                val characteristics = manager.getCameraCharacteristics(cameraId)
+                val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    ?: throw RuntimeException("Cannot get stream configuration map.")
+
+                previewSize = chooseOptimalPreviewSize(map.getOutputSizes(SurfaceTexture::class.java), width, height)
+
+                if (hasCameraPermission()) {
+                    manager.openCamera(cameraId, cameraStateCallback, cameraHandler)
+                }
+            } catch (e: CameraAccessException) {
+                Log.e(TAG, "Cannot access the camera.", e)
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Camera permission not granted.", e)
             }
-            null
-        } catch (e: CameraAccessException) {
-            Log.e(TAG, "Failed to get camera list", e)
-            null
         }
     }
 
-    private fun chooseOptimalSize(
-        choices: Array<Size>,
-        textureViewWidth: Int,
-        textureViewHeight: Int,
-        maxWidth: Int,
-        maxHeight: Int
-    ): Size {
-        val bigEnough = mutableListOf<Size>()
-        val notBigEnough = mutableListOf<Size>()
+    private val cameraStateCallback = object : CameraDevice.StateCallback() {
+        override fun onOpened(camera: CameraDevice) {
+            Log.d(TAG, "Camera device opened.")
+            cameraDevice = camera
+            isCameraSessionActive = true
+            startPreview()
+        }
 
-        val w = textureViewWidth.coerceAtMost(maxWidth)
-        val h = textureViewHeight.coerceAtMost(maxHeight)
+        override fun onDisconnected(camera: CameraDevice) {
+            Log.w(TAG, "Camera device disconnected.")
+            camera.close()
+            isCameraSessionActive = false
+        }
 
-        for (option in choices) {
-            if (option.width <= maxWidth && option.height <= maxHeight) {
-                if (option.width >= w && option.height >= h) {
-                    bigEnough.add(option)
+        override fun onError(camera: CameraDevice, error: Int) {
+            Log.e(TAG, "Camera device error: $error")
+            camera.close()
+            isCameraSessionActive = false
+        }
+    }
+
+    private fun startPreview() {
+        val camera = cameraDevice ?: return
+
+        // Wait until GL thread creates surfaceTexture
+        val ready = setupSurfaceTexture()
+        if (!ready) {
+            Log.e(TAG, "SurfaceTexture not ready — aborting startPreview() to avoid crash.")
+            return
+        }
+
+
+        surfaceTexture?.setDefaultBufferSize(previewSize.width, previewSize.height)
+        val surface = Surface(surfaceTexture)
+
+        setupImageReader()
+        val imageReaderSurface = imageReader.surface
+
+        cameraHandler?.post {
+            try {
+                // store builder & request at class level so the session callback can access it
+                captureRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                    addTarget(surface)
+                    addTarget(imageReaderSurface)
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                }
+
+                captureRequest = captureRequestBuilder?.build()
+
+                camera.createCaptureSession(listOf(surface, imageReaderSurface), sessionStateCallback, cameraHandler)
+            } catch (e: CameraAccessException) {
+                Log.e(TAG, "Failed to start camera session.", e)
+            }
+        }
+    }
+
+    private val sessionStateCallback = object : CameraCaptureSession.StateCallback() {
+        override fun onConfigured(session: CameraCaptureSession) {
+            Log.d(TAG, "Capture session configured.")
+            captureSession = session
+            try {
+                // use the built request that we stored earlier
+                val request = captureRequest
+                if (request != null) {
+                    session.setRepeatingRequest(request, null, cameraHandler)
                 } else {
-                    notBigEnough.add(option)
+                    Log.e(TAG, "CaptureRequest is null; cannot start repeating request.")
                 }
+            } catch (e: CameraAccessException) {
+                Log.e(TAG, "Failed to set repeating request.", e)
             }
         }
 
-        return when {
-            bigEnough.isNotEmpty() -> {
-                bigEnough.minByOrNull { it.width * it.height } ?: choices[0]
+        override fun onConfigureFailed(session: CameraCaptureSession) {
+            Log.e(TAG, "Failed to configure capture session.")
+        }
+    }
+
+    private fun closeCamera() {
+        if (isCameraSessionActive) {
+            isCameraSessionActive = false
+            cameraHandler?.post {
+                try {
+                    captureSession?.close()
+                    captureSession = null
+                    cameraDevice?.close()
+                    cameraDevice = null
+                    // imageReader is lateinit — guard before closing
+                    if (::imageReader.isInitialized) {
+                        imageReader.close()
+                    }
+                    // release SurfaceTexture if present
+                    surfaceTexture?.release()
+                    surfaceTexture = null
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error closing camera resources.", e)
+                }
             }
-            notBigEnough.isNotEmpty() -> {
-                notBigEnough.maxByOrNull { it.width * it.height } ?: choices[0]
-            }
-            else -> {
-                choices[0]
+        } else {
+            // still try to release resources if they exist
+            try {
+                captureSession?.close()
+                captureSession = null
+                cameraDevice?.close()
+                cameraDevice = null
+                if (::imageReader.isInitialized) {
+                    imageReader.close()
+                }
+                surfaceTexture?.release()
+                surfaceTexture = null
+            } catch (e: Exception) {
+                Log.e(TAG, "Error closing camera resources.", e)
             }
         }
     }
 
-    fun getSurfaceTexture(): SurfaceTexture? = surfaceTexture
-    fun getPreviewSize(): Size? = previewSize
-    fun getDisplayRotation(): Int {
-        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val display = windowManager.defaultDisplay
-        return when (display.rotation) {
-            Surface.ROTATION_0 -> 0
-            Surface.ROTATION_90 -> 90
-            Surface.ROTATION_180 -> 180
-            Surface.ROTATION_270 -> 270
-            else -> 0
+    // --- Background Thread Management ---
+
+    private fun startBackgroundThreads() {
+        cameraThread = HandlerThread("CameraThread").also { it.start() }
+        cameraHandler = Handler(cameraThread!!.looper)
+        imageReaderThread = HandlerThread("ImageReaderThread").also { it.start() }
+        imageReaderHandler = Handler(imageReaderThread!!.looper)
+    }
+
+    private fun stopBackgroundThreads() {
+        cameraThread?.quitSafely()
+        imageReaderThread?.quitSafely()
+        try {
+            cameraThread?.join(500) // Wait max 500ms for thread to die
+            cameraThread = null
+            cameraHandler = null
+            imageReaderThread?.join(500)
+            imageReaderThread = null
+            imageReaderHandler = null
+        } catch (e: InterruptedException) {
+            Log.e(TAG, "Error stopping threads.", e)
         }
+    }
+
+    // --- Surface and ImageReader Setup ---
+
+    private fun setupSurfaceTexture(): Boolean {
+        // If already created, return quickly
+        if (surfaceTexture != null) return true
+
+        val latch = CountDownLatch(1)
+        val textures = IntArray(1)
+
+        glSurfaceView.queueEvent {
+            try {
+                GLES20.glGenTextures(1, textures, 0)
+                cameraTextureId = textures[0]
+                surfaceTexture = SurfaceTexture(cameraTextureId).also {
+                    it.setOnFrameAvailableListener {
+                        glSurfaceView.requestRender()
+                    }
+                }
+                onCameraReadyCallback?.invoke(cameraTextureId)
+            } catch (t: Throwable) {
+                Log.e(TAG, "Failed to create SurfaceTexture on GL thread", t)
+            } finally {
+                latch.countDown()
+            }
+        }
+
+        return try {
+            val ok = latch.await(500, TimeUnit.MILLISECONDS)
+            if (!ok) {
+                Log.e(TAG, "Timeout waiting for SurfaceTexture creation on GL thread")
+            }
+            ok && surfaceTexture != null
+        } catch (e: InterruptedException) {
+            Log.e(TAG, "Interrupted while waiting for SurfaceTexture", e)
+            Thread.currentThread().interrupt()
+            false
+        }
+    }
+
+
+    private fun setupImageReader() {
+        imageReader = ImageReader.newInstance(previewSize.width, previewSize.height, ImageFormat.YUV_420_888, 2)
+        imageReader.setOnImageAvailableListener({ reader ->
+            val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+
+            calculateFps()
+
+            if (edgeDetectionEnabled) {
+                val pixels = convertYUVToGrayscale(image)
+                processedFrameCallback?.invoke(pixels, image.width, image.height)
+            }
+
+            image.close()
+        }, imageReaderHandler)
+    }
+
+    // --- Utility and Processing Methods ---
+
+    private fun calculateFps() {
+        frameCount++
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastFpsTimestamp >= 1000) {
+            fpsCallback?.invoke(frameCount.toFloat())
+            frameCount = 0
+            lastFpsTimestamp = currentTime
+        }
+    }
+
+    private fun getBackFacingCameraId(manager: AndroidCameraManager): String? {
+        for (cameraId in manager.cameraIdList) {
+            val characteristics = manager.getCameraCharacteristics(cameraId)
+            if (characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
+                return cameraId
+            }
+        }
+        return null
+    }
+
+    private fun chooseOptimalPreviewSize(choices: Array<Size>, viewWidth: Int, viewHeight: Int): Size {
+        val bigEnough = mutableListOf<Size>()
+        for (option in choices) {
+            if (option.width >= MIN_PREVIEW_WIDTH && option.height >= MIN_PREVIEW_HEIGHT) {
+                bigEnough.add(option)
+            }
+        }
+        return when {
+            bigEnough.isNotEmpty() -> Collections.min(bigEnough, CompareSizesByArea())
+            choices.isNotEmpty() -> choices[0] // Fallback
+            else -> Size(MIN_PREVIEW_WIDTH, MIN_PREVIEW_HEIGHT)
+        }
+    }
+
+    private class CompareSizesByArea : Comparator<Size> {
+        override fun compare(lhs: Size, rhs: Size): Int {
+            // Correctly compare the area of two sizes
+            return (lhs.width.toLong() * lhs.height).compareTo(rhs.width.toLong() * rhs.height)
+        }
+    }
+
+    private fun convertYUVToGrayscale(image: android.media.Image): IntArray {
+        val yPlane = image.planes[0]
+        val yBuffer = yPlane.buffer
+        // make sure buffer position is at 0 before reading indexed bytes
+        yBuffer.rewind()
+        val pixels = IntArray(image.width * image.height)
+        for (i in pixels.indices) {
+            val y = yBuffer.get(i).toInt() and 0xFF
+            pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
+        }
+        return pixels
     }
 }

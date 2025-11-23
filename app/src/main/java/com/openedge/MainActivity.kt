@@ -2,8 +2,11 @@ package com.openedge
 
 import android.Manifest
 import android.animation.ObjectAnimator
+import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.opengl.GLSurfaceView
+import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -15,21 +18,12 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.openedge.camera.CameraManager
 import com.openedge.gl.CameraRenderer
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val CAMERA_PERMISSION_CODE = 100
-
-        init {
-            System.loadLibrary("openedge")
-        }
-    }
-
-    external fun stringFromJNI(): String
-
-    init {
-        com.openedge.processing.EdgeDetection
     }
 
     private lateinit var glSurfaceView: GLSurfaceView
@@ -58,38 +52,49 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
+        // Init vibrator in a compatibility-safe way
+        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Typed API available from M
+            getSystemService(Vibrator::class.java) ?: throw IllegalStateException("No vibrator available")
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
 
+        // Find all views
         glSurfaceView = findViewById(R.id.glSurfaceView)
         fpsText = findViewById(R.id.fpsText)
         processingTimeText = findViewById(R.id.processingTimeText)
         modeText = findViewById(R.id.modeText)
         titleText = findViewById(R.id.titleText)
-
         btnRaw = findViewById(R.id.btnRaw)
         btnGrayscale = findViewById(R.id.btnGrayscale)
         btnEdges = findViewById(R.id.btnEdges)
         btnCapture = findViewById(R.id.btnCapture)
         toggleButton = findViewById(R.id.toggleButton)
-
         sensitivityPanel = findViewById(R.id.sensitivityPanel)
         sensitivitySlider = findViewById(R.id.sensitivitySlider)
 
         animateTitleGlow()
 
+        // --- Setup GLSurfaceView and Renderer ---
         glSurfaceView.setEGLContextClientVersion(2)
         glSurfaceView.preserveEGLContextOnPause = true
 
         cameraRenderer = CameraRenderer()
         cameraRenderer?.setGLSurfaceView(glSurfaceView)
         glSurfaceView.setRenderer(cameraRenderer)
-        glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
 
+        // FIX: Use RENDERMODE_WHEN_DIRTY for efficiency. The renderer will request a render when needed.
+        glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+
+        // --- Setup Camera Manager and Callbacks ---
         cameraManager = CameraManager(this, glSurfaceView)
 
         cameraManager?.setFpsCallback { fps ->
             runOnUiThread {
-                fpsText.text = "FPS: ${String.format("%.1f", fps)}"
+                // Use Locale-aware formatting for user-facing text
+                fpsText.text = "FPS: ${String.format(Locale.getDefault(), "%.1f", fps)}"
 
                 val color = when {
                     fps >= 25 -> 0xFF00FF88.toInt()
@@ -107,9 +112,17 @@ class MainActivity : AppCompatActivity() {
         cameraManager?.setOnCameraReadyCallback { textureId ->
             val surfaceTexture = cameraManager?.getSurfaceTexture() ?: return@setOnCameraReadyCallback
             cameraRenderer?.setSurfaceTexture(surfaceTexture, textureId)
-            cameraRenderer?.setDisplayRotation(cameraManager?.getDisplayRotation() ?: 0)
+            // Renderer handles rotation/viewport updates itself
         }
 
+        // --- Setup UI Listeners ---
+        setupClickListeners()
+
+        setMode(0) // Set initial mode
+        checkCameraPermission()
+    }
+
+    private fun setupClickListeners() {
         btnRaw.setOnClickListener {
             setMode(0)
             vibrateClick()
@@ -143,9 +156,6 @@ class MainActivity : AppCompatActivity() {
                 vibrateClick()
             }
         })
-
-        setMode(0)
-        checkCameraPermission()
     }
 
     private fun setMode(mode: Int) {
@@ -156,22 +166,14 @@ class MainActivity : AppCompatActivity() {
         cameraRenderer?.edgeDetectionEnabled = enabled
 
         val modeNames = arrayOf("RAW", "GRAY", "EDGES")
-        val modeColors = arrayOf(
-            0xFF5555FF.toInt(),
-            0xFF888888.toInt(),
-            0xFF00FFD1.toInt()
-        )
+        val modeColors = arrayOf(0xFF5555FF.toInt(), 0xFF888888.toInt(), 0xFF00FFD1.toInt())
 
         modeText.text = modeNames[mode]
         modeText.setTextColor(modeColors[mode])
 
         toggleButton.text = "MODE: ${modeNames[mode]}"
 
-        if (mode == 2) {
-            animateViewVisibility(sensitivityPanel, true)
-        } else {
-            animateViewVisibility(sensitivityPanel, false)
-        }
+        animateViewVisibility(sensitivityPanel, mode == 2)
 
         resetButtonStyles()
         when (mode) {
@@ -190,50 +192,57 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun animateModeChange() {
-        val scaleX = ObjectAnimator.ofFloat(modeText, "scaleX", 1.0f, 1.3f, 1.0f)
-        val scaleY = ObjectAnimator.ofFloat(modeText, "scaleY", 1.0f, 1.3f, 1.0f)
-        scaleX.duration = 300
-        scaleY.duration = 300
-        scaleX.interpolator = DecelerateInterpolator()
-        scaleY.interpolator = DecelerateInterpolator()
+        val scaleX = ObjectAnimator.ofFloat(modeText, "scaleX", 1.0f, 1.3f, 1.0f).apply {
+            duration = 300
+            interpolator = DecelerateInterpolator()
+        }
+        val scaleY = ObjectAnimator.ofFloat(modeText, "scaleY", 1.0f, 1.3f, 1.0f).apply {
+            duration = 300
+            interpolator = DecelerateInterpolator()
+        }
         scaleX.start()
         scaleY.start()
     }
 
     private fun animateTitleGlow() {
-        val alpha = ObjectAnimator.ofFloat(titleText, "alpha", 1.0f, 0.5f, 1.0f)
-        alpha.duration = 2000
-        alpha.repeatCount = ObjectAnimator.INFINITE
-        alpha.start()
+        ObjectAnimator.ofFloat(titleText, "alpha", 1.0f, 0.5f, 1.0f).apply {
+            duration = 2000
+            repeatCount = ObjectAnimator.INFINITE
+        }.start()
     }
 
     private fun animateViewVisibility(view: View, show: Boolean) {
-        if (show) {
-            view.visibility = View.VISIBLE
+        val targetAlpha = if (show) 1f else 0f
+        if (show && view.visibility != View.VISIBLE) {
             view.alpha = 0f
-            view.animate()
-                .alpha(1f)
-                .setDuration(300)
-                .start()
-        } else {
-            view.animate()
-                .alpha(0f)
-                .setDuration(300)
-                .withEndAction {
+            view.visibility = View.VISIBLE
+        }
+        view.animate()
+            .alpha(targetAlpha)
+            .setDuration(300)
+            .withEndAction {
+                if (!show) {
                     view.visibility = View.GONE
                 }
-                .start()
-        }
+            }
+            .start()
     }
 
     private fun vibrateClick() {
-        if (vibrator.hasVibrator()) {
-            vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+        if (::vibrator.isInitialized && vibrator.hasVibrator()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(50L)
+            }
         }
     }
 
     private fun captureFrame() {
-        Toast.makeText(this, "📸 Frame captured!", Toast.LENGTH_SHORT).show()
+        // TODO: Implement frame capture logic here.
+        // This would involve getting the frame from CameraManager or reading pixels from the GL context.
+        Toast.makeText(this, "📸 Frame capture not implemented!", Toast.LENGTH_SHORT).show()
     }
 
     override fun onResume() {
@@ -243,17 +252,15 @@ class MainActivity : AppCompatActivity() {
         if (cameraManager?.hasCameraPermission() == true) {
             glSurfaceView.post {
                 cameraManager?.onResume(glSurfaceView.width, glSurfaceView.height)
-                cameraRenderer?.setDisplayRotation(cameraManager?.getDisplayRotation() ?: 0)
+                // Renderer handles rotation/viewport updates itself
             }
         }
     }
 
-    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+    override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        glSurfaceView.post {
-            cameraRenderer?.setDisplayRotation(cameraManager?.getDisplayRotation() ?: 0)
-            glSurfaceView.requestRender()
-        }
+        // Requesting a render is enough to let the renderer update its viewport if needed.
+        glSurfaceView.requestRender()
     }
 
     override fun onPause() {
@@ -264,34 +271,27 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        cameraManager?.closeCamera()
+        // Use the public lifecycle method instead of calling a private closeCamera()
+        cameraManager?.onPause()
     }
 
     private fun checkCameraPermission() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-            != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.CAMERA),
-                CAMERA_PERMISSION_CODE
-            )
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_CODE)
         }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray
-    ) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == CAMERA_PERMISSION_CODE) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "✅ Camera ready!", Toast.LENGTH_SHORT).show()
+                // Start the camera now that permission is granted
                 glSurfaceView.post {
                     cameraManager?.onResume(glSurfaceView.width, glSurfaceView.height)
                 }
             } else {
-                Toast.makeText(this, "❌ Camera permission required", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "❌ Camera permission is required to use this app.", Toast.LENGTH_LONG).show()
             }
         }
     }
