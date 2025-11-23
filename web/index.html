@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenEdge Vision - Web Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>⚡ OPENEDGE VISION</h1>
+        <p class="subtitle">Real-time Edge Detection Dashboard</p>
+    </header>
+
+    <main>
+        <div class="viewer-section">
+            <div class="canvas-wrapper">
+                <canvas id="frameCanvas"></canvas>
+                <div id="uploadOverlay" class="upload-overlay">
+                    <div class="upload-hint">
+                        📤 Drop image here or use Upload button
+                    </div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button id="refreshBtn" class="btn btn-primary">🔄 New Sample</button>
+                <button id="animateBtn" class="btn btn-secondary">▶ Start Animation</button>
+                <button id="exportBtn" class="btn btn-success">💾 Export PNG</button>
+                <label for="uploadInput" class="btn btn-upload">📤 Upload Frame</label>
+                <input type="file" id="uploadInput" accept="image/*" style="display: none;">
+            </div>
+        </div>
+
+        <div class="stats-section">
+            <h2>📊 Frame Statistics</h2>
+            <div id="stats" class="stats-grid">
+                <!-- Populated by TypeScript -->
+            </div>
+            <div id="statsInfo" class="stats-info">
+                <p>💡 <strong>Tip:</strong> Upload a screenshot from the Android app to see real frame data!</p>
+            </div>
+        </div>
+
+        <div class="info-section">
+            <h2>ℹ️ System Information</h2>
+            <p>This web dashboard displays processed frames from the OpenEdge Android application using OpenCV C++ edge detection.</p>
+            <ul>
+                <li><strong>Processing Engine:</strong> OpenCV 4.x C++ via JNI</li>
+                <li><strong>Detection Method:</strong> Canny Edge Algorithm</li>
+                <li><strong>Camera API:</strong> Android Camera2 with OpenGL ES 2.0</li>
+                <li><strong>Performance:</strong> Real-time processing at 20-30 FPS</li>
+            </ul>
+
+            <div class="feature-badges">
+                <span class="badge">📱 Android Native</span>
+                <span class="badge">🎯 Triple Mode Support</span>
+                <span class="badge">⚡ GPU Accelerated</span>
+                <span class="badge">🔧 C++ Backend</span>
+                <span class="badge">🌐 Web Integration</span>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>OpenEdge Vision • Advanced Edge Detection Platform • 2025</p>
+    </footer>
+</div>
+
+<script type="module" src="dist/main.js"></script>
+</body>
+</html>

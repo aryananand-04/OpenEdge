@@ -1,19 +1,38 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
+# --- Android & Gradle build output ---
+.gradle/
+build/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+obj/
 
-# Web dependencies
-web/node_modules/
-web/package-lock.jsonOpenCV-android-sdk/
+# --- Local machine settings (should not be in Git) ---
+local.properties
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- IDE folders ---
+.idea/
+.vscode/
+
+# --- Secrets & credentials (never commit) ---
+*.jks
+*.keystore
+google-services.json
+service-account*.json
+
+# --- Logs & temporary files ---
+*.log
+*.tmp
+tmp/
+captures/
+
+# --- Heavy SDKs you installed manually ---
+OpenCV-android-sdk/
+
+# --- Gradle wrapper (these must stay tracked) ---
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+!gradlew
+!gradlew.bat
