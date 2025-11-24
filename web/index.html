@@ -10,7 +10,7 @@
 <div class="container">
     <header>
         <h1>⚡ OPENEDGE VISION</h1>
-        <p class="subtitle">Real-time Edge Detection Dashboard</p>
+        <p class="subtitle">Real-time Edge Detection Dashboard with OpenCV.js</p>
     </header>
 
     <main>
@@ -22,8 +22,20 @@
                         📤 Drop image here or use Upload button
                     </div>
                 </div>
+                <div id="processingOverlay" class="processing-overlay">
+                    <div class="processing-spinner"></div>
+                    <p>Processing with OpenCV...</p>
+                </div>
             </div>
 
+            <!-- Mode Switching Buttons -->
+            <div class="mode-controls">
+                <button id="rawBtn" class="btn-mode">📷 RAW</button>
+                <button id="grayBtn" class="btn-mode">⚪ GRAY</button>
+                <button id="edgesBtn" class="btn-mode active">🔍 EDGES</button>
+            </div>
+
+            <!-- Action Buttons -->
             <div class="controls">
                 <button id="refreshBtn" class="btn btn-primary">🔄 New Sample</button>
                 <button id="animateBtn" class="btn btn-secondary">▶ Start Animation</button>
@@ -39,18 +51,20 @@
                 <!-- Populated by TypeScript -->
             </div>
             <div id="statsInfo" class="stats-info">
-                <p>💡 <strong>Tip:</strong> Upload a screenshot from the Android app to see real frame data!</p>
+                <p>💡 <strong>Tip:</strong> Upload an image and switch between RAW, GRAY, and EDGES modes to see real-time processing!</p>
             </div>
         </div>
 
         <div class="info-section">
             <h2>ℹ️ System Information</h2>
-            <p>This web dashboard displays processed frames from the OpenEdge Android application using OpenCV C++ edge detection.</p>
+            <p>This web dashboard uses <strong>real OpenCV.js</strong> for edge detection processing - the same algorithm running on the Android app!</p>
             <ul>
-                <li><strong>Processing Engine:</strong> OpenCV 4.x C++ via JNI</li>
+                <li><strong>Web Processing:</strong> OpenCV.js 4.9.0 (WebAssembly)</li>
+                <li><strong>Android Processing:</strong> OpenCV C++ 4.9.0 via JNI</li>
                 <li><strong>Detection Method:</strong> Canny Edge Algorithm</li>
                 <li><strong>Camera API:</strong> Android Camera2 with OpenGL ES 2.0</li>
-                <li><strong>Performance:</strong> Real-time processing at 20-30 FPS</li>
+                <li><strong>Three Modes:</strong> RAW (original), GRAY (grayscale), EDGES (Canny)</li>
+                <li><strong>Performance:</strong> Real-time processing at 20-30 FPS on Android</li>
             </ul>
 
             <div class="feature-badges">
@@ -58,7 +72,7 @@
                 <span class="badge">🎯 Triple Mode Support</span>
                 <span class="badge">⚡ GPU Accelerated</span>
                 <span class="badge">🔧 C++ Backend</span>
-                <span class="badge">🌐 Web Integration</span>
+                <span class="badge">🌐 OpenCV.js Web</span>
             </div>
         </div>
     </main>
@@ -68,6 +82,18 @@
     </footer>
 </div>
 
+<!-- Load OpenCV.js from CDN -->
+<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 <script type="module" src="dist/main.js"></script>
+
+<script>
+    // Global callback when OpenCV.js is ready
+    function onOpenCvReady() {
+        console.log('✅ OpenCV.js loaded and ready');
+        if (window.edgeViewer) {
+            window.edgeViewer.onOpenCvReady();
+        }
+    }
+</script>
 </body>
 </html>
