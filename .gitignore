@@ -5,6 +5,8 @@ build/
 **/.cxx/
 **/.externalNativeBuild/
 obj/
+app/build 3/
+app/build/
 
 # --- Local machine settings (should not be in Git) ---
 local.properties

@@ -86,6 +86,9 @@ The result is a practical tool for comparing edge detection results and understa
 - npm or yarn
 
 ---
+## 🎥 Demo
+
+![Demo GIF](Pictures/WebViewer/WebDemo.gif)
 
 ## 📸 Screenshots
 
@@ -143,7 +146,7 @@ The result is a practical tool for comparing edge detection results and understa
       Original camera feed
     </td>
     <td align="center">
-      <img src="Pictures/WebViewer/Eg_1Gray.png" width="250"/><br/>
+      <img src="Pictures/WebViewer/Eg_1Grey.png" width="250"/><br/>
       <b>Grayscale Mode</b><br/>
       Converted to grayscale
     </td>
@@ -161,7 +164,7 @@ The result is a practical tool for comparing edge detection results and understa
       Original camera feed
     </td>
     <td align="center">
-      <img src="Pictures/WebViewer/Eg_2Gray.png" width="250"/><br/>
+      <img src="Pictures/WebViewer/Eg_2Grey.png" width="250"/><br/>
       <b>Grayscale Mode</b><br/>
       Converted to grayscale
     </td>
