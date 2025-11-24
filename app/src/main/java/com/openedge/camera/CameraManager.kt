@@ -44,7 +44,6 @@ class CameraManager(
     private var captureSession: CameraCaptureSession? = null
     private lateinit var previewSize: Size
 
-    // Threads and Handlers for safe, non-blocking camera operations
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
     private var imageReaderThread: HandlerThread? = null
@@ -54,28 +53,20 @@ class CameraManager(
     private var surfaceTexture: SurfaceTexture? = null
     private var cameraTextureId: Int = 0
 
-    // Hold builder and request so session callback can access them
     private var captureRequestBuilder: CaptureRequest.Builder? = null
     private var captureRequest: CaptureRequest? = null
 
-    // Callbacks to communicate with MainActivity
     private var fpsCallback: ((Float) -> Unit)? = null
     private var processedFrameCallback: ((IntArray, Int, Int) -> Unit)? = null
     private var onCameraReadyCallback: ((Int) -> Unit)? = null
 
-    // State management
     @Volatile
     var processingMode = ProcessingMode.RAW
     private var isCameraSessionActive = false
 
-    // FPS Calculation
     private var frameCount = 0
     private var lastFpsTimestamp = System.currentTimeMillis()
-
-    // Sensor orientation
     private var sensorOrientation = 0
-
-    // --- Public API for MainActivity ---
 
     fun setFpsCallback(callback: (Float) -> Unit) {
         fpsCallback = callback
@@ -112,8 +103,6 @@ class CameraManager(
         closeCamera()
         stopBackgroundThreads()
     }
-
-    // --- Camera Lifecycle and State Management ---
 
     private fun openCamera(width: Int, height: Int) {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as AndroidCameraManager
@@ -169,7 +158,6 @@ class CameraManager(
     private fun startPreview() {
         val camera = cameraDevice ?: return
 
-        // Wait until GL thread creates surfaceTexture
         val ready = setupSurfaceTexture()
         if (!ready) {
             Log.e(TAG, "SurfaceTexture not ready — aborting startPreview() to avoid crash.")
@@ -184,7 +172,6 @@ class CameraManager(
 
         cameraHandler?.post {
             try {
-                // store builder & request at class level so the session callback can access it
                 captureRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                     addTarget(surface)
                     addTarget(imageReaderSurface)
@@ -205,7 +192,6 @@ class CameraManager(
             Log.d(TAG, "Capture session configured.")
             captureSession = session
             try {
-                // use the built request that we stored earlier
                 val request = captureRequest
                 if (request != null) {
                     session.setRepeatingRequest(request, null, cameraHandler)
@@ -257,8 +243,6 @@ class CameraManager(
         }
     }
 
-    // --- Background Thread Management ---
-
     private fun startBackgroundThreads() {
         cameraThread = HandlerThread("CameraThread").also { it.start() }
         cameraHandler = Handler(cameraThread!!.looper)
@@ -280,8 +264,6 @@ class CameraManager(
             Log.e(TAG, "Error stopping threads.", e)
         }
     }
-
-    // --- Surface and ImageReader Setup ---
 
     private fun setupSurfaceTexture(): Boolean {
         if (surfaceTexture != null) return true
@@ -346,8 +328,6 @@ class CameraManager(
         }, imageReaderHandler)
     }
 
-    // --- Utility and Processing Methods ---
-
     private fun calculateFps() {
         frameCount++
         val currentTime = System.currentTimeMillis()
@@ -388,6 +368,7 @@ class CameraManager(
         }
     }
 
+    // FIXED: No horizontal flip - process normally
     private fun convertYUVToGrayscale(image: android.media.Image): IntArray {
         val yPlane = image.planes[0]
         val yBuffer = yPlane.buffer
@@ -396,13 +377,12 @@ class CameraManager(
         val height = image.height
         val pixels = IntArray(width * height)
 
-        // Flip horizontally while converting
+        // Direct conversion without flipping
         for (y in 0 until height) {
             for (x in 0 until width) {
-                val srcIdx = y * width + x
-                val dstIdx = y * width + (width - 1 - x) // Flip horizontally
-                val yValue = yBuffer.get(srcIdx).toInt() and 0xFF
-                pixels[dstIdx] = (0xFF shl 24) or (yValue shl 16) or (yValue shl 8) or yValue
+                val idx = y * width + x
+                val yValue = yBuffer.get(idx).toInt() and 0xFF
+                pixels[idx] = (0xFF shl 24) or (yValue shl 16) or (yValue shl 8) or yValue
             }
         }
         return pixels
@@ -416,7 +396,6 @@ class CameraManager(
             for (x in 1 until width - 1) {
                 val idx = y * width + x
 
-                // Get grayscale values (they're all the same in R,G,B)
                 val p1 = (pixels[idx - width - 1] shr 16) and 0xFF
                 val p2 = (pixels[idx - width] shr 16) and 0xFF
                 val p3 = (pixels[idx - width + 1] shr 16) and 0xFF
@@ -426,7 +405,6 @@ class CameraManager(
                 val p8 = (pixels[idx + width] shr 16) and 0xFF
                 val p9 = (pixels[idx + width + 1] shr 16) and 0xFF
 
-                // Sobel kernels
                 val gx = -p1 - 2 * p4 - p7 + p3 + 2 * p6 + p9
                 val gy = -p1 - 2 * p2 - p3 + p7 + 2 * p8 + p9
 

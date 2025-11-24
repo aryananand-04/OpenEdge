@@ -95,6 +95,7 @@ class CameraRenderer : GLSurfaceView.Renderer {
     private val mvpMatrix = FloatArray(16)
     private val stMatrix = FloatArray(16)
     private val rotationMatrix = FloatArray(16)
+    private val processedMatrix = FloatArray(16)
 
     private val vertexBuffer: FloatBuffer = ByteBuffer.allocateDirect(VERTEX_COORDS.size * 4)
         .order(ByteOrder.nativeOrder()).asFloatBuffer().put(VERTEX_COORDS).apply { position(0) }
@@ -106,7 +107,7 @@ class CameraRenderer : GLSurfaceView.Renderer {
     var edgeDetectionEnabled = false
 
     @Volatile
-    var cameraRotation = 0 // Rotation in degrees
+    var cameraRotation = 0
 
     fun setGLSurfaceView(view: GLSurfaceView) {
         glSurfaceView = view
@@ -122,20 +123,26 @@ class CameraRenderer : GLSurfaceView.Renderer {
         Matrix.orthoM(mvpMatrix, 0, -1f, 1f, -1f, 1f, -1f, 1f)
     }
 
+    // For RAW camera preview - apply rotation and horizontal flip
     private fun updateRotationMatrix() {
-        // Create the rotation matrix to match camera orientation
         Matrix.setIdentityM(rotationMatrix, 0)
-
-        // Apply rotation around Z axis
         Matrix.rotateM(rotationMatrix, 0, cameraRotation.toFloat(), 0f, 0f, 1f)
+        Matrix.scaleM(rotationMatrix, 0, -1f, 1f, 1f) // Flip horizontally
 
-        // Flip horizontally to match camera preview (mirror effect)
-        Matrix.scaleM(rotationMatrix, 0, -1f, 1f, 1f)
-
-        // Combine with MVP matrix
         val tempMatrix = FloatArray(16)
         Matrix.multiplyMM(tempMatrix, 0, mvpMatrix, 0, rotationMatrix, 0)
         System.arraycopy(tempMatrix, 0, rotationMatrix, 0, 16)
+    }
+
+    // For processed frames - apply rotation and horizontal flip
+    private fun updateProcessedMatrix() {
+        Matrix.setIdentityM(processedMatrix, 0)
+        Matrix.rotateM(processedMatrix, 0, cameraRotation.toFloat(), 0f, 0f, 1f)
+        Matrix.scaleM(processedMatrix, 0, -1f, 1f, 1f) // Flip horizontally
+
+        val tempMatrix = FloatArray(16)
+        Matrix.multiplyMM(tempMatrix, 0, mvpMatrix, 0, processedMatrix, 0)
+        System.arraycopy(tempMatrix, 0, processedMatrix, 0, 16)
     }
 
     fun updateProcessedTexture(pixels: IntArray, width: Int, height: Int) {
@@ -217,15 +224,14 @@ class CameraRenderer : GLSurfaceView.Renderer {
         val useProcessed = edgeDetectionEnabled && processedTextureId != 0
 
         if (useProcessed) {
-            // Draw processed texture
+            // Draw processed texture with rotation and flip
             GLES20.glUseProgram(programProcessed)
 
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, processedTextureId)
 
-            // Apply rotation for processed texture
-            updateRotationMatrix()
-            GLES20.glUniformMatrix4fv(mvpMatrixHandleProcessed, 1, false, rotationMatrix, 0)
+            updateProcessedMatrix()
+            GLES20.glUniformMatrix4fv(mvpMatrixHandleProcessed, 1, false, processedMatrix, 0)
 
             GLES20.glVertexAttribPointer(positionHandleProcessed, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
             GLES20.glVertexAttribPointer(textureCoordHandleProcessed, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
