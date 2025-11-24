@@ -135,37 +135,41 @@ The result is a practical tool for comparing edge detection results and understa
       <b>Main Dashboard</b><br/>
       Primary interface with edge pattern
     </td>
+  </tr>
+  <tr>
     <td align="center">
-      <img src="Pictures/AppViewer/Eg_1Raw.png" width="250"/><br/>
+      <img src="Pictures/WebViewer/Eg_1Raw.png" width="250"/><br/>
       <b>RAW Camera Mode</b><br/>
       Original camera feed
     </td>
     <td align="center">
-      <img src="Pictures/AppViewer/Eg_1Gray.png" width="250"/><br/>
+      <img src="Pictures/WebViewer/Eg_1Gray.png" width="250"/><br/>
       <b>Grayscale Mode</b><br/>
       Converted to grayscale
     </td>
     <td align="center">
-      <img src="Pictures/AppViewer/Eg_1Edges.png" width="250"/><br/>
+      <img src="Pictures/WebViewer/Eg_1Edges.png" width="250"/><br/>
       <b>Edge Detection</b><br/>
       Real-time Canny edges
     </td>
+  </tr>
+
+  <tr>
     <td align="center">
-      <img src="Pictures/AppViewer/Eg_2Raw.png" width="250"/><br/>
+      <img src="Pictures/WebViewer/Eg_2Raw.png" width="250"/><br/>
       <b>RAW Camera Mode</b><br/>
       Original camera feed
     </td>
     <td align="center">
-      <img src="Pictures/AppViewer/Eg_2Gray.png" width="250"/><br/>
+      <img src="Pictures/WebViewer/Eg_2Gray.png" width="250"/><br/>
       <b>Grayscale Mode</b><br/>
       Converted to grayscale
     </td>
     <td align="center">
-      <img src="Pictures/AppViewer/Eg_2Edges.png" width="250"/><br/>
+      <img src="Pictures/WebViewer/Eg_2Edges.png" width="250"/><br/>
       <b>Edge Detection</b><br/>
       Real-time Canny edges
     </td>
-    
   </tr>
 </table>
 
