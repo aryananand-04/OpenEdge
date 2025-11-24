@@ -87,6 +87,91 @@ The result is a practical tool for comparing edge detection results and understa
 
 ---
 
+## 📸 Screenshots
+
+### Android Application Views
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_1Raw.jpeg" width="250"/><br/>
+      <b>RAW Camera Mode</b><br/>
+      Original camera feed
+    </td>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_1Gray.jpeg" width="250"/><br/>
+      <b>Grayscale Mode</b><br/>
+      Converted to grayscale
+    </td>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_1Edge.jpeg" width="250"/><br/>
+      <b>Edge Detection</b><br/>
+      Real-time Canny edges
+    </td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_2Edge.jpeg" width="250"/><br/>
+      <b>RAW Camera Mode</b><br/>
+      Original camera feed
+    </td>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_2Gray.jpeg" width="250"/><br/>
+      <b>Grayscale Mode</b><br/>
+      Converted to grayscale
+    </td>
+  </tr>
+</table>
+
+### Web Viewer Interface
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="Pictures/WebViewer/Dashboard.png" width="280"/><br/>
+      <b>Main Dashboard</b><br/>
+      Primary interface with edge pattern
+    </td>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_1Raw.png" width="250"/><br/>
+      <b>RAW Camera Mode</b><br/>
+      Original camera feed
+    </td>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_1Gray.png" width="250"/><br/>
+      <b>Grayscale Mode</b><br/>
+      Converted to grayscale
+    </td>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_1Edges.png" width="250"/><br/>
+      <b>Edge Detection</b><br/>
+      Real-time Canny edges
+    </td>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_2Raw.png" width="250"/><br/>
+      <b>RAW Camera Mode</b><br/>
+      Original camera feed
+    </td>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_2Gray.png" width="250"/><br/>
+      <b>Grayscale Mode</b><br/>
+      Converted to grayscale
+    </td>
+    <td align="center">
+      <img src="Pictures/AppViewer/Eg_2Edges.png" width="250"/><br/>
+      <b>Edge Detection</b><br/>
+      Real-time Canny edges
+    </td>
+    
+  </tr>
+</table>
+
+---
+
+
 ### Android Setup
 
 #### 1. Clone and Download OpenCV
@@ -194,8 +279,6 @@ In the browser console, look for:
 
 ---
 
-## Screenshots
-
 ### Android Application Modes
 
 > **📸 Add your screenshots here:**  
@@ -244,17 +327,6 @@ In the browser console, look for:
 </table>
 -->
 
-### Demo Video
-
-> **🎥 Add your demo GIF here:**  
-> Create folder: `docs/Demo_gif/`  
-> Add file: `demo.gif` - Screen recording of app in action
-
-<!-- Uncomment and add your GIF here:
-![Demo](docs/Demo_gif/demo.gif)
--->
-
----
 
 ## Technical Details
 
@@ -477,11 +549,6 @@ These values work well for general-purpose edge detection. You can modify them i
 - [Android Studio](https://developer.android.com/studio)
 - [Visual Studio Code](https://code.visualstudio.com/) (for web development)
 
----
-
-## License
-
-This project is open source and available under the MIT License.
 
 ---
 
